@@ -128,14 +128,12 @@ if uploaded_file is not None:
     # ===============================================================
     st.subheader("📊 Visualizações")
 
-    st.write("#### Produção por Linha (kg)")
-    st.bar_chart(total_linha.set_index("Work Center")["Produção Estimada (kg)"])
+st.write("#### Produção por Linha (kg)")
+st.bar_chart(total_linha.set_index("Work Center")["Produção Estimada (kg)"])
 
-    st.write("#### Mix por Formulação (%)")
-    st.bar_chart(total_formula.set_index("Formulation")["Mix %"])
+st.write("#### Mix por Formulação (%)")
+st.bar_chart(total_formula.set_index("Formulation")["Mix %"])
 
-    st.write("#### Mix por Formulação e Largura (%)")
-    st.bar_chart(total_formula_width.set_index(["Formulation", "Width"])["Mix %"])
-
-else:
-    st.info("⬆️ Faça upload de um arquivo Excel para começar a simulação")
+st.write("#### Mix por Formulação e Largura (%)")
+total_formula_width["Form+Width"] = total_formula_width["Formulation"].astype(str) + " - " + total_formula_width["Width"].astype(str)
+st.bar_chart(total_formula_width.set_index("Form+Width")["Mix %"])
