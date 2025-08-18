@@ -1,190 +1,141 @@
-# ===============================================================
-#  main.py - Simulador de Capacidade de Extrusão
-# ===============================================================
-# Esse script lê uma base de dados (Excel), aplica cenários de mix
-# de formulações (e opcionalmente larguras) por linha de extrusão
-# e gera um relatório consolidado.
-# ===============================================================
-
-# ---- 1. Imports ----
+# main_app.py - Simulador de Capacidade de Extrusão (Streamlit)
 import pandas as pd
-import xlsxwriter
-import os
-from cenarios import cenario_com_larguras as CENARIO  # <- escolha aqui o cenário (ex: cenario_base, cenario_com_larguras)
+import streamlit as st
+from cenarios import cenario_com_larguras as CENARIO
 
-# ---- 2. Carregar base de dados ----
-file_path = r"data\base_dados_jan_jul2025.xlsx"
+# ===============================================================
+# 1. Configuração da página
+# ===============================================================
+st.set_page_config(page_title="Simulador de Capacidade", layout="wide")
+st.title("📊 Simulador de Capacidade de Extrusão")
+st.markdown("Carregue a base de dados e veja os resultados do cenário definido em `cenarios.py`")
 
-print("🚀 Script iniciado")
-print("📂 Pasta atual:", os.getcwd())
-print("🔎 Procurando arquivo:", file_path)
+# ===============================================================
+# 2. Upload do Excel
+# ===============================================================
+uploaded_file = st.file_uploader("📂 Carregue a base de dados (.xlsx)", type=["xlsx"])
 
-if not os.path.exists(file_path):
-    print("❌ ERRO: Arquivo não encontrado. Verifique se está em /data e com o nome correto.")
-    exit(1)
+if uploaded_file is not None:
+    # ---- Leitura ----
+    xls = pd.ExcelFile(uploaded_file)
+    if "Planilha1" in xls.sheet_names:
+        df = pd.read_excel(uploaded_file, sheet_name="Planilha1")
+    else:
+        df = pd.read_excel(uploaded_file, sheet_name=xls.sheet_names[0])
 
-xls = pd.ExcelFile(file_path)
-print("✅ Arquivo encontrado!")
-print("📑 Abas encontradas:", xls.sheet_names)
+    st.success(f"✅ Dados carregados: {df.shape[0]} linhas e {df.shape[1]} colunas")
+    with st.expander("🔎 Visualizar primeiras linhas da base"):
+        st.dataframe(df.head())
 
-if "Planilha1" in xls.sheet_names:
-    df = pd.read_excel(file_path, sheet_name="Planilha1")
-else:
-    df = pd.read_excel(file_path, sheet_name=xls.sheet_names[0])
+    # ===============================================================
+    # 3. Calcular Run Rates médios
+    # ===============================================================
+    df_grouped = (
+        df.groupby(["Work Center", "Formulation", "Width"], dropna=False)
+          .agg({"Matl Produced, Wgt": "sum", "Run Time": "sum"})
+          .reset_index()
+    )
+    df_grouped["Run Rate (kg/h)"] = df_grouped["Matl Produced, Wgt"] / df_grouped["Run Time"]
 
-print(f"✅ Dados carregados: {df.shape}")
-print(df.head())
+    # ===============================================================
+    # 4. Calcular Mix de larguras
+    # ===============================================================
+    mix_raw = (
+        df.groupby(["Work Center", "Formulation", "Width"], dropna=False)["Matl Produced, Wgt"]
+          .sum()
+          .reset_index()
+    )
+    mix_raw["Mix %"] = (
+        mix_raw.groupby(["Work Center", "Formulation"])["Matl Produced, Wgt"]
+               .transform(lambda x: x / x.sum())
+    )
+    mix = mix_raw.copy()
 
-# ---- 3. Calcular Run Rates médios ----
-df_grouped = (
-    df.groupby(["Work Center", "Formulation", "Width"], dropna=False)
-      .agg({"Matl Produced, Wgt": "sum", "Run Time": "sum"})
-      .reset_index()
-)
-df_grouped["Run Rate (kg/h)"] = df_grouped["Matl Produced, Wgt"] / df_grouped["Run Time"]
+    # ===============================================================
+    # 5. Aplicar Cenário
+    # ===============================================================
+    uptime = 0.95
+    horas_mes = 24 * 30 * uptime
+    cenarios = CENARIO
 
-# ---- 4. Calcular mix de larguras ----
-mix_raw = (
-    df.groupby(["Work Center", "Formulation", "Width"], dropna=False)["Matl Produced, Wgt"]
-      .sum()
-      .reset_index()
-)
-mix_raw["Mix %"] = (
-    mix_raw.groupby(["Work Center", "Formulation"])["Matl Produced, Wgt"]
-           .transform(lambda x: x / x.sum())
-)
-mix = mix_raw.copy()
+    producoes = []
+    for linha, formulas in cenarios.items():
+        for formula, config in formulas.items():
 
-# ---- 5. Definições do cenário ----
-uptime = 0.95
-horas_mes = 24 * 30 * uptime
-cenarios = CENARIO
-
-producoes = []
-for linha, formulas in cenarios.items():
-    for formula, config in formulas.items():
-
-        # Caso 1: apenas fração da formula
-        if isinstance(config, (int, float)):
-            frac_formula = config
-            widths_override = None
-        # Caso 2: dict com share_formula + larguras
-        else:
-            frac_formula = config.get("share_formula", 1.0)
-            widths_override = config.get("widths", None)
-
-        subset = df_grouped[(df_grouped["Work Center"] == linha) & (df_grouped["Formulation"] == formula)]
-        mix_subset = mix[(mix["Work Center"] == linha) & (mix["Formulation"] == formula)]
-        
-        for _, row in subset.iterrows():
-            largura = row["Width"]
-            run_rate = row["Run Rate (kg/h)"]
-
-            if widths_override and largura in widths_override:
-                perc = widths_override[largura]
+            if isinstance(config, (int, float)):
+                frac_formula = config
+                widths_override = None
             else:
-                if not mix_subset[mix_subset["Width"] == largura].empty:
-                    perc = mix_subset.loc[mix_subset["Width"] == largura, "Mix %"].iloc[0]
+                frac_formula = config.get("share_formula", 1.0)
+                widths_override = config.get("widths", None)
+
+            subset = df_grouped[(df_grouped["Work Center"] == linha) & (df_grouped["Formulation"] == formula)]
+            mix_subset = mix[(mix["Work Center"] == linha) & (mix["Formulation"] == formula)]
+            
+            for _, row in subset.iterrows():
+                largura = row["Width"]
+                run_rate = row["Run Rate (kg/h)"]
+
+                if widths_override and largura in widths_override:
+                    perc = widths_override[largura]
                 else:
-                    perc = 0
+                    if not mix_subset[mix_subset["Width"] == largura].empty:
+                        perc = mix_subset.loc[mix_subset["Width"] == largura, "Mix %"].iloc[0]
+                    else:
+                        perc = 0
 
-            producao = run_rate * horas_mes * perc * frac_formula
-            producoes.append([linha, formula, largura, producao])
+                producao = run_rate * horas_mes * perc * frac_formula
+                producoes.append([linha, formula, largura, producao])
 
-df_resultados = pd.DataFrame(producoes, columns=["Work Center", "Formulation", "Width", "Produção Estimada (kg)"])
+    df_resultados = pd.DataFrame(producoes, columns=["Work Center", "Formulation", "Width", "Produção Estimada (kg)"])
 
-# ---- 6. Totais ----
-total_consolidado = df_resultados["Produção Estimada (kg)"].sum()
-total_linha = df_resultados.groupby("Work Center")["Produção Estimada (kg)"].sum().reset_index()
-total_formula = df_resultados.groupby("Formulation")["Produção Estimada (kg)"].sum().reset_index()
-total_formula_width = df_resultados.groupby(["Formulation", "Width"])["Produção Estimada (kg)"].sum().reset_index()
+    # ===============================================================
+    # 6. Totais
+    # ===============================================================
+    total_consolidado = df_resultados["Produção Estimada (kg)"].sum()
+    total_linha = df_resultados.groupby("Work Center")["Produção Estimada (kg)"].sum().reset_index()
+    total_formula = df_resultados.groupby("Formulation")["Produção Estimada (kg)"].sum().reset_index()
+    total_formula_width = df_resultados.groupby(["Formulation", "Width"])["Produção Estimada (kg)"].sum().reset_index()
 
-total_linha["Mix %"] = total_linha["Produção Estimada (kg)"] / total_consolidado
-total_formula["Mix %"] = total_formula["Produção Estimada (kg)"] / total_consolidado
-total_formula_width["Mix %"] = total_formula_width["Produção Estimada (kg)"] / total_consolidado
-total_formula_width = total_formula_width[["Formulation", "Width", "Mix %", "Produção Estimada (kg)"]]
+    total_linha["Mix %"] = total_linha["Produção Estimada (kg)"] / total_consolidado
+    total_formula["Mix %"] = total_formula["Produção Estimada (kg)"] / total_consolidado
+    total_formula_width["Mix %"] = total_formula_width["Produção Estimada (kg)"] / total_consolidado
 
-linha_total = pd.DataFrame({
-    "Work Center": ["TOTAL 4 Linhas"],
-    "Produção Estimada (kg)": [total_consolidado],
-    "Mix %": [1.0]
-})
-total_linha = pd.concat([total_linha, linha_total], ignore_index=True)
+    # ===============================================================
+    # 7. Mostrar Resultados
+    # ===============================================================
+    st.subheader("📊 Resultados Detalhados")
+    st.dataframe(df_resultados)
 
-print(f"\n📊 Produção total consolidada: {total_consolidado:,.1f} kg")
+    st.subheader("📈 Consolidados")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Produção Total Estimada (kg)", f"{total_consolidado:,.0f}")
+    with col2:
+        st.metric("Uptime considerado", f"{uptime*100:.1f}%")
 
-# ---- 7. Criar aba Premissas ----
-premissas_data = [
-    ["Premissas", ""],
-    ["Uptime", f"{uptime*100:.1f}%"],
-    ["Tempo de produção (30 dias)", f"{horas_mes:.1f} horas/linha"],
-    ["Produção Total Estimada", f"{total_consolidado:,.0f} kg"],
-    ["", ""],
-    ["Cenário definido", ""],
-]
-for linha, formulas in cenarios.items():
-    premissas_data.append([linha, str(formulas)])
+    st.write("### Produção por Linha")
+    st.dataframe(total_linha)
 
-df_premissas = pd.DataFrame(premissas_data, columns=["Item", "Valor"])
+    st.write("### Produção por Formulação")
+    st.dataframe(total_formula)
 
-# ---- 8. Exportar resultados para Excel ----
-output_path = "output/Relatorio_Extrusion_Capacidade.xlsx"
+    st.write("### Produção por Formulação e Largura")
+    st.dataframe(total_formula_width)
 
-with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
-    df_premissas.to_excel(writer, sheet_name="Premissas", index=False)
-    df_grouped.to_excel(writer, sheet_name="RunRates", index=False)
-    mix.to_excel(writer, sheet_name="Mix", index=False)
-    df.to_excel(writer, sheet_name="Base", index=False)
-    
-    df_resultados.to_excel(writer, sheet_name="Resultados_Detalhados", index=False)
-    total_linha.to_excel(writer, sheet_name="Resultados_Totais", index=False, startrow=0)
-    total_formula.to_excel(writer, sheet_name="Resultados_Totais", index=False, startrow=len(total_linha)+3)
-    total_formula_width.to_excel(writer, sheet_name="Resultados_Totais", index=False, startrow=len(total_linha)+len(total_formula)+6)
+    # ===============================================================
+    # 8. Gráficos Interativos
+    # ===============================================================
+    st.subheader("📊 Visualizações")
 
-    workbook = writer.book
-    ws = writer.sheets["Resultados_Totais"]
-    header_fmt = workbook.add_format({"bold": True, "bg_color": "#D9E1F2"})
-    num_fmt = workbook.add_format({"num_format": "#,##0"})
-    perc_fmt = workbook.add_format({"num_format": "0.0%"})
+    st.write("#### Produção por Linha (kg)")
+    st.bar_chart(total_linha.set_index("Work Center")["Produção Estimada (kg)"])
 
-    ws.set_column("A:A", 25)
-    ws.set_column("B:B", 20, num_fmt)
-    ws.set_column("C:C", 15, perc_fmt)
-    if "D" in total_formula_width.columns:
-        ws.set_column("D:D", 20, num_fmt)
+    st.write("#### Mix por Formulação (%)")
+    st.bar_chart(total_formula.set_index("Formulation")["Mix %"])
 
-    for col_num, value in enumerate(total_linha.columns.values):
-        ws.write(0, col_num, value, header_fmt)
+    st.write("#### Mix por Formulação e Largura (%)")
+    st.bar_chart(total_formula_width.set_index(["Formulation", "Width"])["Mix %"])
 
-    # Gráfico Pizza
-    chart_pie = workbook.add_chart({"type": "pie"})
-    chart_pie.add_series({
-        "name": "Mix por Formulação",
-        "categories": ["Resultados_Totais", len(total_linha)+4, 0, len(total_linha)+len(total_formula)+3, 0],
-        "values": ["Resultados_Totais", len(total_linha)+4, 1, len(total_linha)+len(total_formula)+3, 1],
-        "data_labels": {"percentage": True}
-    })
-    chart_pie.set_title({"name": "Mix por Formulação (%)"})
-    ws.insert_chart("F15", chart_pie)
-
-    # Gráfico Barras
-    chart_bar = workbook.add_chart({"type": "column"})
-    chart_bar.add_series({
-        "name": "Produção por Linha (kg)",
-        "categories": ["Resultados_Totais", 1, 0, len(total_linha)-1, 0],
-        "values": ["Resultados_Totais", 1, 1, len(total_linha)-1, 1],
-        "data_labels": {"value": True}
-    })
-    chart_bar.add_series({
-        "name": "Participação (%)",
-        "categories": ["Resultados_Totais", 1, 0, len(total_linha)-1, 0],
-        "values": ["Resultados_Totais", 1, 2, len(total_linha)-1, 2],
-        "y2_axis": True,
-        "data_labels": {"percentage": True}
-    })
-    chart_bar.set_title({"name": "Produção Estimada por Linha"})
-    chart_bar.set_y_axis({"name": "Produção (kg)"})
-    chart_bar.set_y2_axis({"name": "Share (%)"})
-    ws.insert_chart("F2", chart_bar)
-
-print(f"✅ Relatório gerado em: {os.path.abspath(output_path)}")
+else:
+    st.info("⬆️ Faça upload de um arquivo Excel para começar a simulação")
