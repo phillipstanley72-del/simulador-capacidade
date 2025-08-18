@@ -10,22 +10,19 @@ st.title("📊 Simulador de Capacidade de Extrusão")
 st.markdown("Carregue a base de dados e ajuste os cenários interativamente")
 
 # ===============================================================
-# 2. Upload do Excel
+# 2. Carregar Excel direto do GitHub
 # ===============================================================
-uploaded_file = st.file_uploader("📂 Carregue a base de dados (.xlsx)", type=["xlsx"])
+url_excel = "https://raw.githubusercontent.com/phillipstanley72-del/simulador-capacidade/e53411d5533c9127610b781be8ce2087b9fb39ff/base_dados_jan_jul2025.xlsx"
 
-if uploaded_file is not None:
-    # ---- Leitura ----
-    xls = pd.ExcelFile(uploaded_file)
-    if "Planilha1" in xls.sheet_names:
-        df = pd.read_excel(uploaded_file, sheet_name="Planilha1")
-    else:
-        df = pd.read_excel(uploaded_file, sheet_name=xls.sheet_names[0])
+xls = pd.ExcelFile(url_excel)
+if "Planilha1" in xls.sheet_names:
+    df = pd.read_excel(url_excel, sheet_name="Planilha1")
+else:
+    df = pd.read_excel(url_excel, sheet_name=xls.sheet_names[0])
 
-    st.success(f"✅ Dados carregados: {df.shape[0]} linhas e {df.shape[1]} colunas")
-    with st.expander("🔎 Visualizar primeiras linhas da base"):
-        st.dataframe(df.head())
-
+st.success(f"✅ Dados carregados: {df.shape[0]} linhas e {df.shape[1]} colunas")
+with st.expander("🔎 Visualizar primeiras linhas da base"):
+    st.dataframe(df.head())
     # ===============================================================
     # 3. Calcular Run Rates médios
     # ===============================================================
@@ -150,4 +147,5 @@ for linha in linhas:
 
 else:
     st.info("⬆️ Faça upload de um arquivo Excel para começar a simulação")
+
 
