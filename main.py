@@ -1,14 +1,13 @@
-# main_app.py - Simulador de Capacidade de Extrusão (Streamlit)
+# main.py - Simulador de Capacidade de Extrusão (Streamlit)
 import pandas as pd
 import streamlit as st
-from cenarios import cenario_com_larguras as CENARIO
 
 # ===============================================================
 # 1. Configuração da página
 # ===============================================================
 st.set_page_config(page_title="Simulador de Capacidade", layout="wide")
 st.title("📊 Simulador de Capacidade de Extrusão")
-st.markdown("Carregue a base de dados e veja os resultados do cenário definido em `cenarios.py`")
+st.markdown("Carregue a base de dados e ajuste os cenários interativamente")
 
 # ===============================================================
 # 2. Upload do Excel
@@ -38,40 +37,49 @@ if uploaded_file is not None:
     df_grouped["Run Rate (kg/h)"] = df_grouped["Matl Produced, Wgt"] / df_grouped["Run Time"]
 
     # ===============================================================
-    # 4. Calcular Mix de larguras
+    # 4. Configuração Interativa do Cenário
     # ===============================================================
-    mix_raw = (
-        df.groupby(["Work Center", "Formulation", "Width"], dropna=False)["Matl Produced, Wgt"]
-          .sum()
-          .reset_index()
-    )
-    mix_raw["Mix %"] = (
-        mix_raw.groupby(["Work Center", "Formulation"])["Matl Produced, Wgt"]
-               .transform(lambda x: x / x.sum())
-    )
-    mix = mix_raw.copy()
+    st.subheader("🎛️ Configuração do Cenário")
+
+    linhas = df_grouped["Work Center"].unique()
+    cenarios_interativos = {}
+
+    for linha in linhas:
+        st.markdown(f"## 🔹 Linha {linha}")
+        formulas = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
+        cenarios_interativos[linha] = {}
+
+        for formula in formulas:
+            st.markdown(f"**Formulação {formula}**")
+            share_formula = st.slider(
+                f"% da formulação {formula} em {linha}",
+                0.0, 1.0, 1.0, 0.05, key=f"{linha}_{formula}_share"
+            )
+            cenarios_interativos[linha][formula] = {"share_formula": share_formula, "widths": {}}
+
+            widths = df_grouped[(df_grouped["Work Center"] == linha) & (df_grouped["Formulation"] == formula)]["Width"].unique()
+            for largura in widths:
+                perc_width = st.slider(
+                    f"% da largura {largura} mm ({formula}) em {linha}",
+                    0.0, 1.0, 0.25, 0.05, key=f"{linha}_{formula}_{largura}"
+                )
+                cenarios_interativos[linha][formula]["widths"][largura] = perc_width
 
     # ===============================================================
     # 5. Aplicar Cenário
     # ===============================================================
     uptime = 0.95
     horas_mes = 24 * 30 * uptime
-    cenarios = CENARIO
+    cenarios = cenarios_interativos
 
     producoes = []
     for linha, formulas in cenarios.items():
         for formula, config in formulas.items():
-
-            if isinstance(config, (int, float)):
-                frac_formula = config
-                widths_override = None
-            else:
-                frac_formula = config.get("share_formula", 1.0)
-                widths_override = config.get("widths", None)
+            frac_formula = config.get("share_formula", 1.0)
+            widths_override = config.get("widths", None)
 
             subset = df_grouped[(df_grouped["Work Center"] == linha) & (df_grouped["Formulation"] == formula)]
-            mix_subset = mix[(mix["Work Center"] == linha) & (mix["Formulation"] == formula)]
-            
+
             for _, row in subset.iterrows():
                 largura = row["Width"]
                 run_rate = row["Run Rate (kg/h)"]
@@ -79,10 +87,7 @@ if uploaded_file is not None:
                 if widths_override and largura in widths_override:
                     perc = widths_override[largura]
                 else:
-                    if not mix_subset[mix_subset["Width"] == largura].empty:
-                        perc = mix_subset.loc[mix_subset["Width"] == largura, "Mix %"].iloc[0]
-                    else:
-                        perc = 0
+                    perc = 0
 
                 producao = run_rate * horas_mes * perc * frac_formula
                 producoes.append([linha, formula, largura, producao])
@@ -128,12 +133,15 @@ if uploaded_file is not None:
     # ===============================================================
     st.subheader("📊 Visualizações")
 
-st.write("#### Produção por Linha (kg)")
-st.bar_chart(total_linha.set_index("Work Center")["Produção Estimada (kg)"])
+    st.write("#### Produção por Linha (kg)")
+    st.bar_chart(total_linha.set_index("Work Center")["Produção Estimada (kg)"])
 
-st.write("#### Mix por Formulação (%)")
-st.bar_chart(total_formula.set_index("Formulation")["Mix %"])
+    st.write("#### Mix por Formulação (%)")
+    st.bar_chart(total_formula.set_index("Formulation")["Mix %"])
 
-st.write("#### Mix por Formulação e Largura (%)")
-total_formula_width["Form+Width"] = total_formula_width["Formulation"].astype(str) + " - " + total_formula_width["Width"].astype(str)
-st.bar_chart(total_formula_width.set_index("Form+Width")["Mix %"])
+    st.write("#### Mix por Formulação e Largura (%)")
+    total_formula_width["Form+Width"] = total_formula_width["Formulation"].astype(str) + " - " + total_formula_width["Width"].astype(str)
+    st.bar_chart(total_formula_width.set_index("Form+Width")["Mix %"])
+
+else:
+    st.info("⬆️ Faça upload de um arquivo Excel para começar a simulação")
