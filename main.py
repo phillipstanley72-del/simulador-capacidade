@@ -7,7 +7,7 @@ import streamlit as st
 # ===============================================================
 st.set_page_config(page_title="Simulador de Capacidade", layout="wide")
 st.title("📊 Simulador de Capacidade de Extrusão")
-st.markdown("Carregue a base de dados e ajuste os cenários interativamente")
+st.markdown("Carregue a base de dados diretamente do GitHub e ajuste as premissas interativamente")
 
 # ===============================================================
 # 2. Carregar Excel direto do GitHub
@@ -23,129 +23,145 @@ else:
 st.success(f"✅ Dados carregados: {df.shape[0]} linhas e {df.shape[1]} colunas")
 with st.expander("🔎 Visualizar primeiras linhas da base"):
     st.dataframe(df.head())
-    # ===============================================================
-    # 3. Calcular Run Rates médios
-    # ===============================================================
-    df_grouped = (
-        df.groupby(["Work Center", "Formulation", "Width"], dropna=False)
-          .agg({"Matl Produced, Wgt": "sum", "Run Time": "sum"})
-          .reset_index()
-    )
-    df_grouped["Run Rate (kg/h)"] = df_grouped["Matl Produced, Wgt"] / df_grouped["Run Time"]
 
-   # ===============================================================
-# 4. Configuração Interativa do Cenário (apenas Bag Extrusion)
+# ===============================================================
+# 3. Calcular Run Rates médios
+# ===============================================================
+df_grouped = (
+    df.groupby(["Work Center", "Formulation", "Width"], dropna=False)
+      .agg({"Matl Produced, Wgt": "sum", "Run Time": "sum"})
+      .reset_index()
+)
+df_grouped["Run Rate (kg/h)"] = df_grouped["Matl Produced, Wgt"] / df_grouped["Run Time"]
+
+# ===============================================================
+# 4. Configuração Interativa do Cenário (somente Bag Extrusion)
 # ===============================================================
 st.subheader("🎛️ Configuração do Cenário")
 
-# Filtrar apenas os Work Centers de extrusão
 linhas = [l for l in df_grouped["Work Center"].unique() if "EXBA" in l]
 cenarios_interativos = {}
 
 for linha in linhas:
-    st.markdown(f"## 🔹 Linha {linha}")
-    formulas = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
-    cenarios_interativos[linha] = {}
+    st.markdown(f"## 🔹 {linha}")
+    formulas_disponiveis = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
 
-    for formula in formulas:
-        st.markdown(f"**Formulação {formula}**")
-        share_formula = st.slider(
+    formulas_escolhidas = st.multiselect(
+        f"Selecione fórmulas para {linha}",
+        formulas_disponiveis,
+        default=list(formulas_disponiveis[:1]),
+        key=f"{linha}_formulas"
+    )
+
+    cenarios_interativos[linha] = {}
+    total_share_formula = 0
+
+    for formula in formulas_escolhidas:
+        share_formula = st.number_input(
             f"% da formulação {formula} em {linha}",
-            0.0, 1.0, 1.0, 0.05, key=f"{linha}_{formula}_share"
+            min_value=0.0, max_value=1.0, step=0.05, value=1.0/len(formulas_escolhidas),
+            key=f"{linha}_{formula}_share"
         )
+        total_share_formula += share_formula
         cenarios_interativos[linha][formula] = {"share_formula": share_formula, "widths": {}}
 
-        widths = df_grouped[
-            (df_grouped["Work Center"] == linha) & 
+        widths_disponiveis = df_grouped[
+            (df_grouped["Work Center"] == linha) &
             (df_grouped["Formulation"] == formula)
         ]["Width"].unique()
 
-        for largura in widths:
-            perc_width = st.slider(
+        total_share_widths = 0
+        for largura in widths_disponiveis:
+            share_width = st.number_input(
                 f"% da largura {largura} mm ({formula}) em {linha}",
-                0.0, 1.0, 0.25, 0.05, key=f"{linha}_{formula}_{largura}"
+                min_value=0.0, max_value=1.0, step=0.05, value=1.0/len(widths_disponiveis),
+                key=f"{linha}_{formula}_{largura}"
             )
-            cenarios_interativos[linha][formula]["widths"][largura] = perc_width
+            cenarios_interativos[linha][formula]["widths"][largura] = share_width
+            total_share_widths += share_width
 
-    # ===============================================================
-    # 5. Aplicar Cenário
-    # ===============================================================
-    uptime = 0.95
-    horas_mes = 24 * 30 * uptime
-    cenarios = cenarios_interativos
+        if abs(total_share_widths - 1) > 0.001:
+            st.warning(f"⚠️ A soma das larguras da fórmula {formula} em {linha} é {total_share_widths:.2f} (deve ser 1.0)")
 
-    producoes = []
-    for linha, formulas in cenarios.items():
-        for formula, config in formulas.items():
-            frac_formula = config.get("share_formula", 1.0)
-            widths_override = config.get("widths", None)
+    if abs(total_share_formula - 1) > 0.001:
+        st.error(f"❌ A soma das fórmulas em {linha} é {total_share_formula:.2f} (deve ser 1.0)")
 
-            subset = df_grouped[(df_grouped["Work Center"] == linha) & (df_grouped["Formulation"] == formula)]
+# ===============================================================
+# 5. Aplicar Cenário
+# ===============================================================
+uptime = 0.95
+horas_mes = 24 * 30 * uptime
+cenarios = cenarios_interativos
 
-            for _, row in subset.iterrows():
-                largura = row["Width"]
-                run_rate = row["Run Rate (kg/h)"]
+producoes = []
+for linha, formulas in cenarios.items():
+    for formula, config in formulas.items():
+        frac_formula = config.get("share_formula", 1.0)
+        widths_override = config.get("widths", None)
 
-                if widths_override and largura in widths_override:
-                    perc = widths_override[largura]
-                else:
-                    perc = 0
+        subset = df_grouped[(df_grouped["Work Center"] == linha) & (df_grouped["Formulation"] == formula)]
 
-                producao = run_rate * horas_mes * perc * frac_formula
-                producoes.append([linha, formula, largura, producao])
+        for _, row in subset.iterrows():
+            largura = row["Width"]
+            run_rate = row["Run Rate (kg/h)"]
 
-    df_resultados = pd.DataFrame(producoes, columns=["Work Center", "Formulation", "Width", "Produção Estimada (kg)"])
+            if widths_override and largura in widths_override:
+                perc = widths_override[largura]
+            else:
+                perc = 0
 
-    # ===============================================================
-    # 6. Totais
-    # ===============================================================
-    total_consolidado = df_resultados["Produção Estimada (kg)"].sum()
-    total_linha = df_resultados.groupby("Work Center")["Produção Estimada (kg)"].sum().reset_index()
-    total_formula = df_resultados.groupby("Formulation")["Produção Estimada (kg)"].sum().reset_index()
-    total_formula_width = df_resultados.groupby(["Formulation", "Width"])["Produção Estimada (kg)"].sum().reset_index()
+            producao = run_rate * horas_mes * perc * frac_formula
+            producoes.append([linha, formula, largura, producao])
 
-    total_linha["Mix %"] = total_linha["Produção Estimada (kg)"] / total_consolidado
-    total_formula["Mix %"] = total_formula["Produção Estimada (kg)"] / total_consolidado
-    total_formula_width["Mix %"] = total_formula_width["Produção Estimada (kg)"] / total_consolidado
+df_resultados = pd.DataFrame(producoes, columns=["Work Center", "Formulation", "Width", "Produção Estimada (kg)"])
 
-    # ===============================================================
-    # 7. Mostrar Resultados
-    # ===============================================================
-    st.subheader("📊 Resultados Detalhados")
-    st.dataframe(df_resultados)
+# ===============================================================
+# 6. Totais
+# ===============================================================
+total_consolidado = df_resultados["Produção Estimada (kg)"].sum()
+total_linha = df_resultados.groupby("Work Center")["Produção Estimada (kg)"].sum().reset_index()
+total_formula = df_resultados.groupby("Formulation")["Produção Estimada (kg)"].sum().reset_index()
+total_formula_width = df_resultados.groupby(["Formulation", "Width"])["Produção Estimada (kg)"].sum().reset_index()
 
-    st.subheader("📈 Consolidados")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Produção Total Estimada (kg)", f"{total_consolidado:,.0f}")
-    with col2:
-        st.metric("Uptime considerado", f"{uptime*100:.1f}%")
+total_linha["Mix %"] = total_linha["Produção Estimada (kg)"] / total_consolidado
+total_formula["Mix %"] = total_formula["Produção Estimada (kg)"] / total_consolidado
+total_formula_width["Mix %"] = total_formula_width["Produção Estimada (kg)"] / total_consolidado
 
-    st.write("### Produção por Linha")
-    st.dataframe(total_linha)
+# ===============================================================
+# 7. Mostrar Resultados
+# ===============================================================
+st.subheader("📊 Resultados Detalhados")
+st.dataframe(df_resultados)
 
-    st.write("### Produção por Formulação")
-    st.dataframe(total_formula)
+st.subheader("📈 Consolidados")
+col1, col2 = st.columns(2)
+with col1:
+    st.metric("Produção Total Estimada (kg)", f"{total_consolidado:,.0f}")
+with col2:
+    st.metric("Uptime considerado", f"{uptime*100:.1f}%")
 
-    st.write("### Produção por Formulação e Largura")
-    st.dataframe(total_formula_width)
+st.write("### Produção por Linha")
+st.dataframe(total_linha)
 
-    # ===============================================================
-    # 8. Gráficos Interativos
-    # ===============================================================
-    st.subheader("📊 Visualizações")
+st.write("### Produção por Formulação")
+st.dataframe(total_formula)
 
-    st.write("#### Produção por Linha (kg)")
-    st.bar_chart(total_linha.set_index("Work Center")["Produção Estimada (kg)"])
+st.write("### Produção por Formulação e Largura")
+st.dataframe(total_formula_width)
 
-    st.write("#### Mix por Formulação (%)")
-    st.bar_chart(total_formula.set_index("Formulation")["Mix %"])
+# ===============================================================
+# 8. Gráficos Interativos
+# ===============================================================
+st.subheader("📊 Visualizações")
 
-    st.write("#### Mix por Formulação e Largura (%)")
-    total_formula_width["Form+Width"] = total_formula_width["Formulation"].astype(str) + " - " + total_formula_width["Width"].astype(str)
-    st.bar_chart(total_formula_width.set_index("Form+Width")["Mix %"])
+st.write("#### Produção por Linha (kg)")
+st.bar_chart(total_linha.set_index("Work Center")["Produção Estimada (kg)"])
 
-else:
-    st.info("⬆️ Faça upload de um arquivo Excel para começar a simulação")
+st.write("#### Mix por Formulação (%)")
+st.bar_chart(total_formula.set_index("Formulation")["Mix %"])
 
-
+st.write("#### Mix por Formulação e Largura (%)")
+total_formula_width["Form+Width"] = (
+    total_formula_width["Formulation"].astype(str) + " - " + total_formula_width["Width"].astype(str)
+)
+st.bar_chart(total_formula_width.set_index("Form+Width")["Mix %"])
