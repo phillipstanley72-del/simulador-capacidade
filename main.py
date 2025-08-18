@@ -36,34 +36,39 @@ if uploaded_file is not None:
     )
     df_grouped["Run Rate (kg/h)"] = df_grouped["Matl Produced, Wgt"] / df_grouped["Run Time"]
 
-    # ===============================================================
-    # 4. Configuração Interativa do Cenário
-    # ===============================================================
-    st.subheader("🎛️ Configuração do Cenário")
+   # ===============================================================
+# 4. Configuração Interativa do Cenário (apenas Bag Extrusion)
+# ===============================================================
+st.subheader("🎛️ Configuração do Cenário")
 
-    linhas = df_grouped["Work Center"].unique()
-    cenarios_interativos = {}
+# Filtrar apenas os Work Centers de extrusão
+linhas = [l for l in df_grouped["Work Center"].unique() if "EXBA" in l]
+cenarios_interativos = {}
 
-    for linha in linhas:
-        st.markdown(f"## 🔹 Linha {linha}")
-        formulas = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
-        cenarios_interativos[linha] = {}
+for linha in linhas:
+    st.markdown(f"## 🔹 Linha {linha}")
+    formulas = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
+    cenarios_interativos[linha] = {}
 
-        for formula in formulas:
-            st.markdown(f"**Formulação {formula}**")
-            share_formula = st.slider(
-                f"% da formulação {formula} em {linha}",
-                0.0, 1.0, 1.0, 0.05, key=f"{linha}_{formula}_share"
+    for formula in formulas:
+        st.markdown(f"**Formulação {formula}**")
+        share_formula = st.slider(
+            f"% da formulação {formula} em {linha}",
+            0.0, 1.0, 1.0, 0.05, key=f"{linha}_{formula}_share"
+        )
+        cenarios_interativos[linha][formula] = {"share_formula": share_formula, "widths": {}}
+
+        widths = df_grouped[
+            (df_grouped["Work Center"] == linha) & 
+            (df_grouped["Formulation"] == formula)
+        ]["Width"].unique()
+
+        for largura in widths:
+            perc_width = st.slider(
+                f"% da largura {largura} mm ({formula}) em {linha}",
+                0.0, 1.0, 0.25, 0.05, key=f"{linha}_{formula}_{largura}"
             )
-            cenarios_interativos[linha][formula] = {"share_formula": share_formula, "widths": {}}
-
-            widths = df_grouped[(df_grouped["Work Center"] == linha) & (df_grouped["Formulation"] == formula)]["Width"].unique()
-            for largura in widths:
-                perc_width = st.slider(
-                    f"% da largura {largura} mm ({formula}) em {linha}",
-                    0.0, 1.0, 0.25, 0.05, key=f"{linha}_{formula}_{largura}"
-                )
-                cenarios_interativos[linha][formula]["widths"][largura] = perc_width
+            cenarios_interativos[linha][formula]["widths"][largura] = perc_width
 
     # ===============================================================
     # 5. Aplicar Cenário
@@ -145,3 +150,4 @@ if uploaded_file is not None:
 
 else:
     st.info("⬆️ Faça upload de um arquivo Excel para começar a simulação")
+
