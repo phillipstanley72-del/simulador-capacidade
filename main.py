@@ -47,21 +47,43 @@ defaults = {
 }
 
 # ===============================================================
-# 5. Configuração Interativa do Cenário (lado a lado + uptime)
+# 5. Configuração Interativa do Cenário (lado a lado + uptime + dias)
 # ===============================================================
 st.subheader("🎛️ Configuração do Cenário")
 
 linhas = [l for l in df_grouped["Work Center"].unique() if "EXBA" in l]
 cenarios_interativos = {}
 uptimes_por_linha = {}
+dias_por_linha = {}
 
 cols = st.columns(len(linhas))
 
 for idx, linha in enumerate(linhas):
     with cols[idx]:
         st.markdown(f"### 🔹 {linha}")
-        formulas_disponiveis = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
 
+        # Uptime individual
+        key_uptime = f"{linha}_uptime"
+        uptime_val = st.number_input(
+            f"Uptime {linha} (%)",
+            min_value=0, max_value=100, step=1,
+            value=int(st.session_state.get(key_uptime, 95)),
+            key=key_uptime
+        )
+        uptimes_por_linha[linha] = uptime_val / 100
+
+        # Dias individuais
+        key_dias = f"{linha}_dias"
+        dias_val = st.number_input(
+            f"Dias de operação {linha}",
+            min_value=0, max_value=100, step=1,
+            value=int(st.session_state.get(key_dias, 30)),
+            key=key_dias
+        )
+        dias_por_linha[linha] = dias_val
+
+        # Seleção de fórmulas
+        formulas_disponiveis = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
         formulas_escolhidas = st.multiselect(
             f"Selecione fórmulas para {linha}",
             formulas_disponiveis,
@@ -98,25 +120,38 @@ for idx, linha in enumerate(linhas):
                 key=f"{linha}_{formula}_larguras"
             )
 
-            # Distribuição automática igualitária em inteiros
-            if len(larguras_escolhidas) > 0:
-                base = int(round(100 / len(larguras_escolhidas)))
-            else:
-                base = 0
+            # Distribuição automática igualitária
+            base = int(round(100 / len(larguras_escolhidas))) if len(larguras_escolhidas) > 0 else 0
 
             total_share_widths = 0
             for largura in larguras_escolhidas:
                 key_width = f"{linha}_{formula}_{largura}"
                 default_val_width = defaults.get(linha, {}).get(formula, {}).get("widths", {}).get(largura, base)
-                share_width_pct = st.number_input(
-                    f"% largura {largura} mm",
-                    min_value=0, max_value=100, step=5,
-                    value=int(st.session_state.get(key_width, default_val_width)),
-                    key=key_width
-                )
+
+                col_left, col_right = st.columns([1,1])
+                with col_left:
+                    share_width_pct = st.number_input(
+                        f"% {largura} mm",
+                        min_value=0, max_value=100, step=5,
+                        value=int(st.session_state.get(key_width, default_val_width)),
+                        key=key_width
+                    )
                 share_width = share_width_pct / 100
                 cenarios_interativos[linha][formula]["widths"][largura] = share_width
                 total_share_widths += share_width
+
+                # volume estimado (com base no run_rate médio)
+                subset = df_grouped[
+                    (df_grouped["Work Center"] == linha) &
+                    (df_grouped["Formulation"] == formula) &
+                    (df_grouped["Width"] == largura)
+                ]
+                if not subset.empty:
+                    run_rate = subset["Run Rate (kg/h)"].values[0]
+                    horas_mes = 24 * dias_val * (uptime_val/100)
+                    volume_estimado = run_rate * horas_mes * share_width * share_formula
+                    with col_right:
+                        st.write(f"{int(volume_estimado):,} kg")
 
             if abs(total_share_widths - 1) > 0.001 and len(larguras_escolhidas) > 0:
                 st.warning(f"⚠️ Soma larguras {formula} = {total_share_widths*100:.0f}% (deve ser 100%)")
@@ -124,23 +159,14 @@ for idx, linha in enumerate(linhas):
         if abs(total_share_formula - 1) > 0.001:
             st.error(f"❌ Soma das fórmulas = {total_share_formula*100:.0f}% (deve ser 100%)")
 
-        # Uptime individual por linha
-        key_uptime = f"{linha}_uptime"
-        uptime_val = st.number_input(
-            f"Uptime {linha} (%)",
-            min_value=0, max_value=100, step=1,
-            value=int(st.session_state.get(key_uptime, 95)),
-            key=key_uptime
-        )
-        uptimes_por_linha[linha] = uptime_val / 100
-
 # ===============================================================
 # 6. Aplicar Cenário
 # ===============================================================
 producoes = []
 for linha, formulas in cenarios_interativos.items():
     uptime = uptimes_por_linha.get(linha, 0.95)
-    horas_mes = 24 * 30 * uptime
+    dias = dias_por_linha.get(linha, 30)
+    horas_mes = 24 * dias * uptime
 
     for formula, config in formulas.items():
         frac_formula = config.get("share_formula", 1.0)
@@ -175,65 +201,29 @@ total_formula["Mix %"] = total_formula["Produção Estimada (kg)"] / total_conso
 total_formula_width["Mix %"] = total_formula_width["Produção Estimada (kg)"] / total_consolidado
 
 # ===============================================================
-# 8. Resumo das Premissas
+# 8. Consolidados (tabelas principais mantidas)
 # ===============================================================
-st.subheader("📋 Resumo das Premissas Configuradas")
-
-premissas_rows = []
-for linha, formulas in cenarios_interativos.items():
-    for formula, config in formulas.items():
-        frac_formula = config["share_formula"] * 100
-        for largura, perc in config["widths"].items():
-            premissas_rows.append([linha, formula, largura, perc*100, frac_formula])
-
-df_premissas = pd.DataFrame(premissas_rows, columns=["Work Center", "Formulação", "Largura (mm)", "Mix Largura %", "Mix Fórmula %"])
-df_premissas["Mix Largura %"] = df_premissas["Mix Largura %"].round(1).astype(str) + "%"
-df_premissas["Mix Fórmula %"] = df_premissas["Mix Fórmula %"].round(1).astype(str) + "%"
-st.dataframe(df_premissas)
-
-# ===============================================================
-# 9. Mostrar Resultados (formatados, com fillna)
-# ===============================================================
-st.subheader("📊 Resultados Detalhados")
-df_resultados_fmt = df_resultados.copy()
-df_resultados_fmt["Produção Estimada (kg)"] = (
-    df_resultados_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
-)
-st.dataframe(df_resultados_fmt)
-
 st.subheader("📈 Consolidados")
 col1, col2 = st.columns(2)
 with col1:
     st.metric("Produção Total Estimada (kg)", f"{total_consolidado:,.0f}")
 with col2:
-    st.metric("Uptime considerado", f"{uptime*100:.1f}%")
+    st.metric("Linhas consideradas", f"{len(linhas)}")
 
 st.write("### Produção por Linha")
 df_total_linha_fmt = total_linha.copy()
-df_total_linha_fmt["Produção Estimada (kg)"] = (
-    df_total_linha_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
-)
+df_total_linha_fmt["Produção Estimada (kg)"] = df_total_linha_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
 df_total_linha_fmt["Mix %"] = (df_total_linha_fmt["Mix %"] * 100).round(1).astype(str) + "%"
 st.dataframe(df_total_linha_fmt)
 
 st.write("### Produção por Formulação")
 df_total_formula_fmt = total_formula.copy()
-df_total_formula_fmt["Produção Estimada (kg)"] = (
-    df_total_formula_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
-)
+df_total_formula_fmt["Produção Estimada (kg)"] = df_total_formula_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
 df_total_formula_fmt["Mix %"] = (df_total_formula_fmt["Mix %"] * 100).round(1).astype(str) + "%"
 st.dataframe(df_total_formula_fmt)
 
-st.write("### Produção por Formulação e Largura")
-df_total_formula_width_fmt = total_formula_width.copy()
-df_total_formula_width_fmt["Produção Estimada (kg)"] = (
-    df_total_formula_width_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
-)
-df_total_formula_width_fmt["Mix %"] = (df_total_formula_width_fmt["Mix %"] * 100).round(1).astype(str) + "%"
-st.dataframe(df_total_formula_width_fmt)
-
 # ===============================================================
-# 10. Gráficos Interativos (Altair)
+# 9. Gráficos Interativos (Altair)
 # ===============================================================
 st.subheader("📊 Visualizações")
 
@@ -255,30 +245,27 @@ chart_formula = alt.Chart(total_formula).mark_bar().encode(
 )
 st.altair_chart(chart_formula, use_container_width=True)
 
-# --- Mix por Formulação e Largura ---
+# --- Mix por Formulação e Largura (pizza) ---
 st.write("#### Mix por Formulação e Largura (%)")
-total_formula_width["Form+Width"] = (
-    total_formula_width["Formulation"].astype(str) + " - " + total_formula_width["Width"].astype(str)
-)
-chart_formula_width = alt.Chart(total_formula_width).mark_bar().encode(
-    x=alt.X("Form+Width:N", title="Formulação + Largura"),
-    y=alt.Y("Mix %:Q", title="Mix (%)", axis=alt.Axis(format=".1%")),
+df_pizza = total_formula_width[total_formula_width["Produção Estimada (kg)"] > 0].copy()
+df_pizza["Label"] = df_pizza["Formulation"].astype(str) + " - " + df_pizza["Width"].astype(str)
+chart_pizza = alt.Chart(df_pizza).mark_arc().encode(
+    theta=alt.Theta(field="Mix %", type="quantitative"),
+    color=alt.Color(field="Label", type="nominal"),
     tooltip=["Formulation", "Width", alt.Tooltip("Mix %:Q", format=".1%")]
-).properties(width=600)
-st.altair_chart(chart_formula_width, use_container_width=True)
+)
+st.altair_chart(chart_pizza, use_container_width=True)
 
 # ===============================================================
-# 11. Download Excel
+# 10. Download Excel
 # ===============================================================
 st.subheader("⬇️ Exportar Relatório para Excel")
 
 output = BytesIO()
 with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-    df_premissas.to_excel(writer, sheet_name="Premissas", index=False)
-    df_resultados_fmt.to_excel(writer, sheet_name="Resultados Detalhados", index=False)
     df_total_linha_fmt.to_excel(writer, sheet_name="Resultados por Linha", index=False)
     df_total_formula_fmt.to_excel(writer, sheet_name="Resultados por Formulação", index=False)
-    df_total_formula_width_fmt.to_excel(writer, sheet_name="Resultados Fórmula+Largura", index=False)
+    df_pizza.to_excel(writer, sheet_name="Resultados Fórmula+Largura", index=False)
 
 st.download_button(
     label="📥 Baixar Relatório Excel",
@@ -286,5 +273,3 @@ st.download_button(
     file_name="Relatorio_Capacidade.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
-
-
