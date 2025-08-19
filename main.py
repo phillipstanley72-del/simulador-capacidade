@@ -47,82 +47,101 @@ defaults = {
 }
 
 # ===============================================================
-# 5. Configuração Interativa do Cenário (somente Bag Extrusion)
+# 5. Configuração Interativa do Cenário (lado a lado + uptime)
 # ===============================================================
 st.subheader("🎛️ Configuração do Cenário")
 
 linhas = [l for l in df_grouped["Work Center"].unique() if "EXBA" in l]
 cenarios_interativos = {}
+uptimes_por_linha = {}
 
-for linha in linhas:
-    st.markdown(f"## 🔹 {linha}")
-    formulas_disponiveis = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
+cols = st.columns(len(linhas))
 
-    formulas_escolhidas = st.multiselect(
-        f"Selecione fórmulas para {linha}",
-        formulas_disponiveis,
-        default=list(defaults.get(linha, {}).keys()) or [formulas_disponiveis[0]],
-        key=f"{linha}_formulas"
-    )
+for idx, linha in enumerate(linhas):
+    with cols[idx]:
+        st.markdown(f"### 🔹 {linha}")
+        formulas_disponiveis = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
 
-    cenarios_interativos[linha] = {}
-    total_share_formula = 0
-
-    for formula in formulas_escolhidas:
-        key_formula = f"{linha}_{formula}_share"
-        default_val = defaults.get(linha, {}).get(formula, {}).get("share_formula", 0)
-        share_formula_pct = st.number_input(
-            f"% da formulação {formula} em {linha}",
-            min_value=0, max_value=100, step=5,
-            value=st.session_state.get(key_formula, default_val),
-            key=key_formula
-        )
-        share_formula = share_formula_pct / 100
-        total_share_formula += share_formula
-        cenarios_interativos[linha][formula] = {"share_formula": share_formula, "widths": {}}
-
-        # --- Seleção de larguras ---
-        larguras_disponiveis = df_grouped[
-            (df_grouped["Work Center"] == linha) &
-            (df_grouped["Formulation"] == formula)
-        ]["Width"].unique()
-
-        larguras_escolhidas = st.multiselect(
-            f"Selecione larguras para {formula} em {linha}",
-            larguras_disponiveis,
-            default=list(defaults.get(linha, {}).get(formula, {}).get("widths", {}).keys()),
-            key=f"{linha}_{formula}_larguras"
+        formulas_escolhidas = st.multiselect(
+            f"Selecione fórmulas para {linha}",
+            formulas_disponiveis,
+            default=list(defaults.get(linha, {}).keys()) or [formulas_disponiveis[0]],
+            key=f"{linha}_formulas"
         )
 
-        total_share_widths = 0
-        for largura in larguras_escolhidas:
-            key_width = f"{linha}_{formula}_{largura}"
-            default_val_width = defaults.get(linha, {}).get(formula, {}).get("widths", {}).get(largura, 0)
-            share_width_pct = st.number_input(
-                f"% da largura {largura} mm ({formula}) em {linha}",
+        cenarios_interativos[linha] = {}
+        total_share_formula = 0
+
+        for formula in formulas_escolhidas:
+            key_formula = f"{linha}_{formula}_share"
+            default_val = defaults.get(linha, {}).get(formula, {}).get("share_formula", 0)
+            share_formula_pct = st.number_input(
+                f"% da formulação {formula}",
                 min_value=0, max_value=100, step=5,
-                value=st.session_state.get(key_width, default_val_width),
-                key=key_width
+                value=st.session_state.get(key_formula, default_val),
+                key=key_formula
             )
-            share_width = share_width_pct / 100
-            cenarios_interativos[linha][formula]["widths"][largura] = share_width
-            total_share_widths += share_width
+            share_formula = share_formula_pct / 100
+            total_share_formula += share_formula
+            cenarios_interativos[linha][formula] = {"share_formula": share_formula, "widths": {}}
 
-        if abs(total_share_widths - 1) > 0.001 and len(larguras_escolhidas) > 0:
-            st.warning(f"⚠️ A soma das larguras da fórmula {formula} em {linha} é {total_share_widths*100:.1f}% (deve ser 100%)")
+            # --- Seleção de larguras ---
+            larguras_disponiveis = df_grouped[
+                (df_grouped["Work Center"] == linha) &
+                (df_grouped["Formulation"] == formula)
+            ]["Width"].unique()
 
-    if abs(total_share_formula - 1) > 0.001:
-        st.error(f"❌ A soma das fórmulas em {linha} é {total_share_formula*100:.1f}% (deve ser 100%)")
+            larguras_escolhidas = st.multiselect(
+                f"Larguras {formula}",
+                larguras_disponiveis,
+                default=list(defaults.get(linha, {}).get(formula, {}).get("widths", {}).keys()),
+                key=f"{linha}_{formula}_larguras"
+            )
+
+            # Distribuição automática igualitária
+            if len(larguras_escolhidas) > 0:
+                valor_base = round(100 / len(larguras_escolhidas), 1)
+            else:
+                valor_base = 0
+
+            total_share_widths = 0
+            for largura in larguras_escolhidas:
+                key_width = f"{linha}_{formula}_{largura}"
+                default_val_width = defaults.get(linha, {}).get(formula, {}).get("widths", {}).get(largura, valor_base)
+                share_width_pct = st.number_input(
+                    f"% largura {largura} mm",
+                    min_value=0, max_value=100, step=5,
+                    value=st.session_state.get(key_width, default_val_width),
+                    key=key_width
+                )
+                share_width = share_width_pct / 100
+                cenarios_interativos[linha][formula]["widths"][largura] = share_width
+                total_share_widths += share_width
+
+            if abs(total_share_widths - 1) > 0.001 and len(larguras_escolhidas) > 0:
+                st.warning(f"⚠️ Soma larguras {formula} = {total_share_widths*100:.1f}% (deve ser 100%)")
+
+        if abs(total_share_formula - 1) > 0.001:
+            st.error(f"❌ Soma das fórmulas = {total_share_formula*100:.1f}% (deve ser 100%)")
+
+        # Uptime individual por linha
+        key_uptime = f"{linha}_uptime"
+        uptime_val = st.number_input(
+            f"Uptime {linha} (%)",
+            min_value=0, max_value=100, step=1,
+            value=st.session_state.get(key_uptime, 95),
+            key=key_uptime
+        )
+        uptimes_por_linha[linha] = uptime_val / 100
 
 # ===============================================================
 # 6. Aplicar Cenário
 # ===============================================================
-uptime = 0.95
-horas_mes = 24 * 30 * uptime
-cenarios = cenarios_interativos
-
 producoes = []
-for linha, formulas in cenarios.items():
+for linha, formulas in cenarios_interativos.items():
+    uptime = uptimes_por_linha.get(linha, 0.95)
+    horas_mes = 24 * 30 * uptime
+
     for formula, config in formulas.items():
         frac_formula = config.get("share_formula", 1.0)
         widths_override = config.get("widths", None)
@@ -267,3 +286,4 @@ st.download_button(
     file_name="Relatorio_Capacidade.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
