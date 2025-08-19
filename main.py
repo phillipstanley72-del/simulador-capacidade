@@ -47,7 +47,7 @@ defaults = {
 }
 
 # ===============================================================
-# 5. Configuração Interativa do Cenário (lado a lado + uptime + dias)
+# 5. Configuração Interativa do Cenário (lado a lado + uptime + dias + volume estimado)
 # ===============================================================
 st.subheader("🎛️ Configuração do Cenário")
 
@@ -61,8 +61,9 @@ cols = st.columns(len(linhas))
 for idx, linha in enumerate(linhas):
     with cols[idx]:
         st.markdown(f"### 🔹 {linha}")
+        formulas_disponiveis = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
 
-        # Uptime individual
+        # Uptime individual por linha
         key_uptime = f"{linha}_uptime"
         uptime_val = st.number_input(
             f"Uptime {linha} (%)",
@@ -72,10 +73,10 @@ for idx, linha in enumerate(linhas):
         )
         uptimes_por_linha[linha] = uptime_val / 100
 
-        # Dias individuais
+        # Dias individuais por linha
         key_dias = f"{linha}_dias"
         dias_val = st.number_input(
-            f"Dias de operação {linha}",
+            f"Dias considerados {linha}",
             min_value=0, max_value=100, step=1,
             value=int(st.session_state.get(key_dias, 30)),
             key=key_dias
@@ -83,7 +84,6 @@ for idx, linha in enumerate(linhas):
         dias_por_linha[linha] = dias_val
 
         # Seleção de fórmulas
-        formulas_disponiveis = df_grouped[df_grouped["Work Center"] == linha]["Formulation"].unique()
         formulas_escolhidas = st.multiselect(
             f"Selecione fórmulas para {linha}",
             formulas_disponiveis,
@@ -120,18 +120,21 @@ for idx, linha in enumerate(linhas):
                 key=f"{linha}_{formula}_larguras"
             )
 
-            # Distribuição automática igualitária
-            base = int(round(100 / len(larguras_escolhidas))) if len(larguras_escolhidas) > 0 else 0
+            # Distribuição automática igualitária em inteiros
+            if len(larguras_escolhidas) > 0:
+                base = int(round(100 / len(larguras_escolhidas)))
+            else:
+                base = 0
 
             total_share_widths = 0
             for largura in larguras_escolhidas:
                 key_width = f"{linha}_{formula}_{largura}"
                 default_val_width = defaults.get(linha, {}).get(formula, {}).get("widths", {}).get(largura, base)
 
-                col_left, col_right = st.columns([1,1])
+                col_left, col_right = st.columns([1, 1])
                 with col_left:
                     share_width_pct = st.number_input(
-                        f"% {largura} mm",
+                        f"% largura {largura} mm",
                         min_value=0, max_value=100, step=5,
                         value=int(st.session_state.get(key_width, default_val_width)),
                         key=key_width
@@ -140,31 +143,31 @@ for idx, linha in enumerate(linhas):
                 cenarios_interativos[linha][formula]["widths"][largura] = share_width
                 total_share_widths += share_width
 
-                # volume estimado (com base no run_rate médio)
-subset = df_grouped[
-    (df_grouped["Work Center"] == linha) &
-    (df_grouped["Formulation"] == formula) &
-    (df_grouped["Width"] == largura)
-]
-if not subset.empty:
-    run_rate = subset["Run Rate (kg/h)"].values[0]
-    horas_mes = 24 * dias_val * (uptime_val/100)
-    volume_estimado = run_rate * horas_mes * share_width * share_formula
-else:
-    volume_estimado = 0
+                # volume estimado
+                subset = df_grouped[
+                    (df_grouped["Work Center"] == linha) &
+                    (df_grouped["Formulation"] == formula) &
+                    (df_grouped["Width"] == largura)
+                ]
+                if not subset.empty:
+                    run_rate = subset["Run Rate (kg/h)"].values[0]
+                    horas_mes = 24 * dias_val * (uptime_val / 100)
+                    volume_estimado = run_rate * horas_mes * share_width * share_formula
+                else:
+                    volume_estimado = 0
 
-if pd.isna(volume_estimado):
-    volume_estimado = 0
+                if pd.isna(volume_estimado):
+                    volume_estimado = 0
 
-with col_right:
-    st.write(f"{int(volume_estimado):,} kg")
-
+                with col_right:
+                    st.write(f"{int(volume_estimado):,} kg")
 
             if abs(total_share_widths - 1) > 0.001 and len(larguras_escolhidas) > 0:
                 st.warning(f"⚠️ Soma larguras {formula} = {total_share_widths*100:.0f}% (deve ser 100%)")
 
         if abs(total_share_formula - 1) > 0.001:
             st.error(f"❌ Soma das fórmulas = {total_share_formula*100:.0f}% (deve ser 100%)")
+
 
 # ===============================================================
 # 6. Aplicar Cenário
@@ -280,5 +283,6 @@ st.download_button(
     file_name="Relatorio_Capacidade.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
 
 
