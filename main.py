@@ -140,21 +140,24 @@ for idx, linha in enumerate(linhas):
                 cenarios_interativos[linha][formula]["widths"][largura] = share_width
                 total_share_widths += share_width
 
-                               # volume estimado (com base no run_rate médio)
-                subset = df_grouped[
-                    (df_grouped["Work Center"] == linha) &
-                    (df_grouped["Formulation"] == formula) &
-                    (df_grouped["Width"] == largura)
-                ]
-                if not subset.empty:
-                    run_rate = subset["Run Rate (kg/h)"].values[0]
-                    horas_mes = 24 * dias_val * (uptime_val/100)
-                    volume_estimado = run_rate * horas_mes * share_width * share_formula
-                else:
-                    volume_estimado = 0
+                # volume estimado (com base no run_rate médio)
+subset = df_grouped[
+    (df_grouped["Work Center"] == linha) &
+    (df_grouped["Formulation"] == formula) &
+    (df_grouped["Width"] == largura)
+]
+if not subset.empty:
+    run_rate = subset["Run Rate (kg/h)"].values[0]
+    horas_mes = 24 * dias_val * (uptime_val/100)
+    volume_estimado = run_rate * horas_mes * share_width * share_formula
+else:
+    volume_estimado = 0
 
-                with col_right:
-                    st.write(f"{int(volume_estimado or 0):,} kg")
+if pd.isna(volume_estimado):
+    volume_estimado = 0
+
+with col_right:
+    st.write(f"{int(volume_estimado):,} kg")
 
 
             if abs(total_share_widths - 1) > 0.001 and len(larguras_escolhidas) > 0:
@@ -277,4 +280,5 @@ st.download_button(
     file_name="Relatorio_Capacidade.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
 
