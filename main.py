@@ -78,7 +78,7 @@ for idx, linha in enumerate(linhas):
             share_formula_pct = st.number_input(
                 f"% da formulação {formula}",
                 min_value=0, max_value=100, step=5,
-                value=st.session_state.get(key_formula, default_val),
+                value=int(st.session_state.get(key_formula, default_val)),
                 key=key_formula
             )
             share_formula = share_formula_pct / 100
@@ -98,20 +98,20 @@ for idx, linha in enumerate(linhas):
                 key=f"{linha}_{formula}_larguras"
             )
 
-            # Distribuição automática igualitária
+            # Distribuição automática igualitária em inteiros
             if len(larguras_escolhidas) > 0:
-                valor_base = round(100 / len(larguras_escolhidas), 1)
+                base = int(round(100 / len(larguras_escolhidas)))
             else:
-                valor_base = 0
+                base = 0
 
             total_share_widths = 0
             for largura in larguras_escolhidas:
                 key_width = f"{linha}_{formula}_{largura}"
-                default_val_width = defaults.get(linha, {}).get(formula, {}).get("widths", {}).get(largura, valor_base)
+                default_val_width = defaults.get(linha, {}).get(formula, {}).get("widths", {}).get(largura, base)
                 share_width_pct = st.number_input(
                     f"% largura {largura} mm",
                     min_value=0, max_value=100, step=5,
-                    value=st.session_state.get(key_width, default_val_width),
+                    value=int(st.session_state.get(key_width, default_val_width)),
                     key=key_width
                 )
                 share_width = share_width_pct / 100
@@ -119,17 +119,17 @@ for idx, linha in enumerate(linhas):
                 total_share_widths += share_width
 
             if abs(total_share_widths - 1) > 0.001 and len(larguras_escolhidas) > 0:
-                st.warning(f"⚠️ Soma larguras {formula} = {total_share_widths*100:.1f}% (deve ser 100%)")
+                st.warning(f"⚠️ Soma larguras {formula} = {total_share_widths*100:.0f}% (deve ser 100%)")
 
         if abs(total_share_formula - 1) > 0.001:
-            st.error(f"❌ Soma das fórmulas = {total_share_formula*100:.1f}% (deve ser 100%)")
+            st.error(f"❌ Soma das fórmulas = {total_share_formula*100:.0f}% (deve ser 100%)")
 
         # Uptime individual por linha
         key_uptime = f"{linha}_uptime"
         uptime_val = st.number_input(
             f"Uptime {linha} (%)",
             min_value=0, max_value=100, step=1,
-            value=st.session_state.get(key_uptime, 95),
+            value=int(st.session_state.get(key_uptime, 95)),
             key=key_uptime
         )
         uptimes_por_linha[linha] = uptime_val / 100
@@ -286,4 +286,5 @@ st.download_button(
     file_name="Relatorio_Capacidade.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
 
