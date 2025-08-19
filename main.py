@@ -133,11 +133,13 @@ total_formula["Mix %"] = total_formula["Produção Estimada (kg)"] / total_conso
 total_formula_width["Mix %"] = total_formula_width["Produção Estimada (kg)"] / total_consolidado
 
 # ===============================================================
-# 7. Mostrar Resultados (formatados)
+# 7. Mostrar Resultados (formatados, com fillna)
 # ===============================================================
 st.subheader("📊 Resultados Detalhados")
 df_resultados_fmt = df_resultados.copy()
-df_resultados_fmt["Produção Estimada (kg)"] = df_resultados_fmt["Produção Estimada (kg)"].round(0).astype(int)
+df_resultados_fmt["Produção Estimada (kg)"] = (
+    df_resultados_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
+)
 st.dataframe(df_resultados_fmt)
 
 st.subheader("📈 Consolidados")
@@ -149,19 +151,25 @@ with col2:
 
 st.write("### Produção por Linha")
 df_total_linha_fmt = total_linha.copy()
-df_total_linha_fmt["Produção Estimada (kg)"] = df_total_linha_fmt["Produção Estimada (kg)"].round(0).astype(int)
+df_total_linha_fmt["Produção Estimada (kg)"] = (
+    df_total_linha_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
+)
 df_total_linha_fmt["Mix %"] = (df_total_linha_fmt["Mix %"] * 100).round(1).astype(str) + "%"
 st.dataframe(df_total_linha_fmt)
 
 st.write("### Produção por Formulação")
 df_total_formula_fmt = total_formula.copy()
-df_total_formula_fmt["Produção Estimada (kg)"] = df_total_formula_fmt["Produção Estimada (kg)"].round(0).astype(int)
+df_total_formula_fmt["Produção Estimada (kg)"] = (
+    df_total_formula_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
+)
 df_total_formula_fmt["Mix %"] = (df_total_formula_fmt["Mix %"] * 100).round(1).astype(str) + "%"
 st.dataframe(df_total_formula_fmt)
 
 st.write("### Produção por Formulação e Largura")
 df_total_formula_width_fmt = total_formula_width.copy()
-df_total_formula_width_fmt["Produção Estimada (kg)"] = df_total_formula_width_fmt["Produção Estimada (kg)"].round(0).astype(int)
+df_total_formula_width_fmt["Produção Estimada (kg)"] = (
+    df_total_formula_width_fmt["Produção Estimada (kg)"].fillna(0).round(0).astype(int)
+)
 df_total_formula_width_fmt["Mix %"] = (df_total_formula_width_fmt["Mix %"] * 100).round(1).astype(str) + "%"
 st.dataframe(df_total_formula_width_fmt)
 
