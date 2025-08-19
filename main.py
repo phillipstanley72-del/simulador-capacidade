@@ -2,6 +2,7 @@
 import pandas as pd
 import streamlit as st
 import altair as alt
+from io import BytesIO
 
 # ===============================================================
 # 1. Configuração da página
@@ -36,7 +37,17 @@ df_grouped = (
 df_grouped["Run Rate (kg/h)"] = df_grouped["Matl Produced, Wgt"] / df_grouped["Run Time"]
 
 # ===============================================================
-# 4. Configuração Interativa do Cenário (somente Bag Extrusion)
+# 4. Defaults de premissas
+# ===============================================================
+defaults = {
+    "4027/EXBA01": {"YB206": {"share_formula": 100, "widths": {200: 50, 220: 50}}},
+    "4027/EXBA02": {"YB206": {"share_formula": 100, "widths": {310: 50, 340: 50}}},
+    "4027/EXBA03": {"YB206": {"share_formula": 100, "widths": {430: 50, 400: 50}}},
+    "4027/EXBA04": {"YB206": {"share_formula": 100, "widths": {260: 50, 280: 50}}},
+}
+
+# ===============================================================
+# 5. Configuração Interativa do Cenário (somente Bag Extrusion)
 # ===============================================================
 st.subheader("🎛️ Configuração do Cenário")
 
@@ -50,7 +61,7 @@ for linha in linhas:
     formulas_escolhidas = st.multiselect(
         f"Selecione fórmulas para {linha}",
         formulas_disponiveis,
-        default=list(formulas_disponiveis[:1]),
+        default=list(defaults.get(linha, {}).keys()) or [formulas_disponiveis[0]],
         key=f"{linha}_formulas"
     )
 
@@ -58,11 +69,13 @@ for linha in linhas:
     total_share_formula = 0
 
     for formula in formulas_escolhidas:
+        key_formula = f"{linha}_{formula}_share"
+        default_val = defaults.get(linha, {}).get(formula, {}).get("share_formula", 0)
         share_formula_pct = st.number_input(
             f"% da formulação {formula} em {linha}",
             min_value=0, max_value=100, step=5,
-            value=int(100/len(formulas_escolhidas)),
-            key=f"{linha}_{formula}_share"
+            value=st.session_state.get(key_formula, default_val),
+            key=key_formula
         )
         share_formula = share_formula_pct / 100
         total_share_formula += share_formula
@@ -75,24 +88,26 @@ for linha in linhas:
 
         total_share_widths = 0
         for largura in widths_disponiveis:
+            key_width = f"{linha}_{formula}_{largura}"
+            default_val_width = defaults.get(linha, {}).get(formula, {}).get("widths", {}).get(largura, 0)
             share_width_pct = st.number_input(
                 f"% da largura {largura} mm ({formula}) em {linha}",
                 min_value=0, max_value=100, step=5,
-                value=int(100/len(widths_disponiveis)),
-                key=f"{linha}_{formula}_{largura}"
+                value=st.session_state.get(key_width, default_val_width),
+                key=key_width
             )
             share_width = share_width_pct / 100
             cenarios_interativos[linha][formula]["widths"][largura] = share_width
             total_share_widths += share_width
 
-        if abs(total_share_widths - 1) > 0.001:
+        if abs(total_share_widths - 1) > 0.001 and len(widths_disponiveis) > 0:
             st.warning(f"⚠️ A soma das larguras da fórmula {formula} em {linha} é {total_share_widths*100:.1f}% (deve ser 100%)")
 
     if abs(total_share_formula - 1) > 0.001:
         st.error(f"❌ A soma das fórmulas em {linha} é {total_share_formula*100:.1f}% (deve ser 100%)")
 
 # ===============================================================
-# 5. Aplicar Cenário
+# 6. Aplicar Cenário
 # ===============================================================
 uptime = 0.95
 horas_mes = 24 * 30 * uptime
@@ -121,7 +136,7 @@ for linha, formulas in cenarios.items():
 df_resultados = pd.DataFrame(producoes, columns=["Work Center", "Formulation", "Width", "Produção Estimada (kg)"])
 
 # ===============================================================
-# 6. Totais
+# 7. Totais
 # ===============================================================
 total_consolidado = df_resultados["Produção Estimada (kg)"].sum()
 total_linha = df_resultados.groupby("Work Center")["Produção Estimada (kg)"].sum().reset_index()
@@ -133,7 +148,24 @@ total_formula["Mix %"] = total_formula["Produção Estimada (kg)"] / total_conso
 total_formula_width["Mix %"] = total_formula_width["Produção Estimada (kg)"] / total_consolidado
 
 # ===============================================================
-# 7. Mostrar Resultados (formatados, com fillna)
+# 8. Resumo das Premissas
+# ===============================================================
+st.subheader("📋 Resumo das Premissas Configuradas")
+
+premissas_rows = []
+for linha, formulas in cenarios_interativos.items():
+    for formula, config in formulas.items():
+        frac_formula = config["share_formula"] * 100
+        for largura, perc in config["widths"].items():
+            premissas_rows.append([linha, formula, largura, perc*100, frac_formula])
+
+df_premissas = pd.DataFrame(premissas_rows, columns=["Work Center", "Formulação", "Largura (mm)", "Mix Largura %", "Mix Fórmula %"])
+df_premissas["Mix Largura %"] = df_premissas["Mix Largura %"].round(1).astype(str) + "%"
+df_premissas["Mix Fórmula %"] = df_premissas["Mix Fórmula %"].round(1).astype(str) + "%"
+st.dataframe(df_premissas)
+
+# ===============================================================
+# 9. Mostrar Resultados (formatados, com fillna)
 # ===============================================================
 st.subheader("📊 Resultados Detalhados")
 df_resultados_fmt = df_resultados.copy()
@@ -174,7 +206,7 @@ df_total_formula_width_fmt["Mix %"] = (df_total_formula_width_fmt["Mix %"] * 100
 st.dataframe(df_total_formula_width_fmt)
 
 # ===============================================================
-# 8. Gráficos Interativos (Altair)
+# 10. Gráficos Interativos (Altair)
 # ===============================================================
 st.subheader("📊 Visualizações")
 
@@ -207,3 +239,23 @@ chart_formula_width = alt.Chart(total_formula_width).mark_bar().encode(
     tooltip=["Formulation", "Width", alt.Tooltip("Mix %:Q", format=".1%")]
 ).properties(width=600)
 st.altair_chart(chart_formula_width, use_container_width=True)
+
+# ===============================================================
+# 11. Download Excel
+# ===============================================================
+st.subheader("⬇️ Exportar Relatório para Excel")
+
+output = BytesIO()
+with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    df_premissas.to_excel(writer, sheet_name="Premissas", index=False)
+    df_resultados_fmt.to_excel(writer, sheet_name="Resultados Detalhados", index=False)
+    df_total_linha_fmt.to_excel(writer, sheet_name="Resultados por Linha", index=False)
+    df_total_formula_fmt.to_excel(writer, sheet_name="Resultados por Formulação", index=False)
+    df_total_formula_width_fmt.to_excel(writer, sheet_name="Resultados Fórmula+Largura", index=False)
+
+st.download_button(
+    label="📥 Baixar Relatório Excel",
+    data=output.getvalue(),
+    file_name="Relatorio_Capacidade.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
